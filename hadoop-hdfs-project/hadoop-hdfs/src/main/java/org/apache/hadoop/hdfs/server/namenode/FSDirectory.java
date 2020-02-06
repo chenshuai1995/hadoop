@@ -102,6 +102,27 @@ import org.apache.hadoop.security.AccessControlException;
  * FSDirectory is a pure in-memory data structure, all of whose operations
  * happen entirely in memory. In contrast, FSNamesystem persists the operations
  * to the disk.
+ *
+ * FSDirectory和FSNamesystem两个组件都一起管理者namespace（元数据）
+ *
+ * FSNamesystem首先是对元数据进行管理的一个核心入口组件，其实无论是维护内存中还是磁盘上的元数据，都会找FSNamesystem，
+ *   但是他对于内存中的元数据管理操作，都会转交给FSDirectory来处理
+ * FSDirectory是一个纯内存的数据结构，
+ *   1、也就是说他里面包含了代表文件目录树的数据结构INode
+ *   2、对它的所有操作，都是在内存中完成的
+ *
+ * FSNamesystem除了作为一个元数据管理的入口组件以外，对元数据的管理维护操作，都是由它来对磁盘上的文件进行读写操作的
+ *
+ * hdfs元数据，分成几大块：1、内存中的文件目录树；2、磁盘上的edit log；3、磁盘上的fsimage文件
+ *
+ * hdfs平时运行时修改元数据，一般就是更新内存中的文件目录树，以及写入磁盘上的edit log文件
+ * 后台定期进行checkpoint操作，会对磁盘上的fsimage和edit log进行合并
+ * namenode每次启动时，都会从磁盘上加载fsimage和eidit log 在内存中进行合并
+ *
+ * FSDirectory就是一个专门维护和管理内存中的元数据（内存目录树）
+ *
+ * FSNamesystem是专门负责管理比如往磁盘上写edit log文件，或者是后台合并fsimage和edit log文件，这些磁盘上的元数据操作，都是这个组件来负责的
+ *
  * @see org.apache.hadoop.hdfs.server.namenode.FSNamesystem
  **/
 @InterfaceAudience.Private
@@ -137,6 +158,8 @@ public class FSDirectory implements Closeable {
   private final XAttr UNREADABLE_BY_SUPERUSER_XATTR =
       XAttrHelper.buildXAttr(SECURITY_XATTR_UNREADABLE_BY_SUPERUSER, null);
 
+  // 从这里往下延伸，就是一个内存里的文件目录树，一个根节点
+  // 其实代表了一个文件目录树
   INodeDirectory rootDir;
   private final FSNamesystem namesystem;
   private volatile boolean skipQuotaCheck = false; //skip while consuming edits
@@ -145,6 +168,7 @@ public class FSDirectory implements Closeable {
   private final int lsLimit;  // max list limit
   private final int contentCountLimit; // max content summary counts per run
   private final long contentSleepMicroSec;
+  // INodeId -> INode 映射
   private final INodeMap inodeMap; // Synchronized by dirLock
   private long yieldCount = 0; // keep track of lock yield count.
   private final int inodeXAttrsLimit; //inode xattrs max limit
@@ -324,6 +348,7 @@ public class FSDirectory implements Closeable {
     boolean added = false;
     writeLock();
     try {
+      // 添加一个inode
       added = addINode(path, newNode);
     } finally {
       writeUnlock();
@@ -1850,6 +1875,7 @@ public class FSDirectory implements Closeable {
     assert hasWriteLock();
     final INodeDirectory dir = new INodeDirectory(inodeId, name, permission,
         timestamp);
+    // 将创建的INodeDirectory添加到内存的文件目录树中
     if (addChild(inodesInPath, pos, dir, true)) {
       if (aclEntries != null) {
         AclStorage.updateINodeAcl(dir, aclEntries, Snapshot.CURRENT_STATE_ID);
@@ -2085,7 +2111,9 @@ public class FSDirectory implements Closeable {
     }
     // always verify inode name
     verifyINodeName(child.getLocalNameBytes());
-    
+
+    // 可以设置某个目录的文件数量的quota，限额
+    // 限制某个目录下面最多只能放指定数量文件，比如说只能放100个文件
     final Quota.Counts counts = child.computeQuotaUsage();
     updateCount(iip, pos,
         counts.get(Quota.NAMESPACE), counts.get(Quota.DISKSPACE), checkQuota);

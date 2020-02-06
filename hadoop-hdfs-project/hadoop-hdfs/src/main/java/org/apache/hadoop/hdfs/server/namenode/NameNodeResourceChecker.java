@@ -80,11 +80,13 @@ public class NameNodeResourceChecker {
 
     @Override
     public boolean isResourceAvailable() {
+      // 底层调用JDK的API，file.getUsableSpace，来检查是否有充足可用空间
       long availableSpace = df.getAvailable();
       if (LOG.isDebugEnabled()) {
         LOG.debug("Space available on volume '" + volume + "' is "
             + availableSpace);
       }
+      // duReserved：默认100MB
       if (availableSpace < duReserved) {
         LOG.warn("Space available on volume '" + volume + "' is "
             + availableSpace +
@@ -110,6 +112,7 @@ public class NameNodeResourceChecker {
     this.conf = conf;
     volumes = new HashMap<String, CheckedVolume>();
 
+    // 默认100MB
     duReserved = conf.getLong(DFSConfigKeys.DFS_NAMENODE_DU_RESERVED_KEY,
         DFSConfigKeys.DFS_NAMENODE_DU_RESERVED_DEFAULT);
     

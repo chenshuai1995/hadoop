@@ -287,6 +287,7 @@ public final class HdfsServerConstants {
     /**
      * The block is under construction.<br>
      * It has been recently allocated for write or append.
+     * 最近被分配去写或者追加数据
      */
     UNDER_CONSTRUCTION,
     /**

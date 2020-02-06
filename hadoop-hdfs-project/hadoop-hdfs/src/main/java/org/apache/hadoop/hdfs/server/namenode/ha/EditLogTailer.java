@@ -55,12 +55,17 @@ import com.google.common.base.Preconditions;
  * EditLogTailer represents a thread which periodically reads from edits
  * journals and applies the transactions contained within to a given
  * FSNamesystem.
+ *
+ * EditLogTailer代表了一个后台线程，这个后台线程会不断的周期性的从journal nodes集群上拉取edit log数据流
+ * 接着就将edit log数据流给应用到自己的FSNamesystem上去，也就是自己本地的元数据上去
+ *
  */
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
 public class EditLogTailer {
   public static final Log LOG = LogFactory.getLog(EditLogTailer.class);
-  
+
+  // 本地内部线程
   private final EditLogTailerThread tailerThread;
   
   private final Configuration conf;
@@ -307,7 +312,12 @@ public class EditLogTailer {
         try {
           // There's no point in triggering a log roll if the Standby hasn't
           // read any more transactions since the last time a roll was
-          // triggered. 
+          // triggered.
+          // 看起来这个好像是说，如果距离上一次roll edits log以后，standby一直么有接收到更多的edit log
+          // 触发一次active namenode的edit log roll
+          // edit log roll 是个什么操作
+          // 大概可以理解为，重新创建一个新的edits_inprogress文件
+          // 之前的文件就固定为startTransactionId~endTransactionId的一个文件（roll其实就是滚动）
           if (tooLongSinceLastLoad() &&
               lastRollTriggerTxId < lastLoadedTxnId) {
             triggerActiveLogRoll();
@@ -321,6 +331,7 @@ public class EditLogTailer {
           if (!shouldRun) {
             break;
           }
+          // 核心逻辑
           doTailEdits();
         } catch (EditLogInputException elie) {
           LOG.warn("Error while reading edits from disk. Will try again.", elie);
@@ -334,6 +345,8 @@ public class EditLogTailer {
         }
 
         try {
+          // standby namenode默认每个60秒去尝试获取journal node的edit log
+          // 这个时间很重要
           Thread.sleep(sleepTimeMs);
         } catch (InterruptedException e) {
           LOG.warn("Edit log tailer interrupted", e);

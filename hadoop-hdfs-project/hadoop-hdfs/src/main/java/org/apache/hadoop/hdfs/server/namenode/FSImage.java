@@ -583,6 +583,8 @@ public class FSImage implements Closeable {
   /**
    * Choose latest image from one of the directories,
    * load it and merge with the edits.
+   *
+   * 从目录中选择一个最近的fsimage文件，然后跟edits log进行合并
    * 
    * Saving and loading fsimage should never trigger symlink resolution. 
    * The paths that are persisted do not have *intermediate* symlinks 
@@ -664,6 +666,7 @@ public class FSImage implements Closeable {
     FSImageFile imageFile = null;
     for (int i = 0; i < imageFiles.size(); i++) {
       try {
+        // 1. 先加载fsimage到内存里来
         imageFile = imageFiles.get(i);
         loadFSImageFile(target, recovery, imageFile, startOpt);
         break;
@@ -681,6 +684,7 @@ public class FSImage implements Closeable {
     prog.endPhase(Phase.LOADING_FSIMAGE);
     
     if (!rollingRollback) {
+      // 2. 再加载fsimage之后的edit log进来
       long txnsAdvanced = loadEdits(editStreams, target, startOpt, recovery);
       needToSave |= needsResaveBasedOnStaleCheckpoint(imageFile.getFile(),
           txnsAdvanced);
@@ -778,6 +782,8 @@ public class FSImage implements Closeable {
       editLog.recoverUnclosedStreams();
     } else {
       // This NN is HA and we're not doing an upgrade.
+      // 底层调用JournalSet里的JournalManager
+      // 就是在namenode刚启动的时候初始化的
       editLog.initSharedJournalsForRead();
     }
   }
@@ -826,6 +832,10 @@ public class FSImage implements Closeable {
         LOG.info("Reading " + editIn + " expecting start txid #" +
               (lastAppliedTxId + 1));
         try {
+          // 核心逻辑
+          // FSEditLogLoader组件，他一来了底层的EditLogInputStream去拉取数据
+          // 这里，基于Loader就完成了从journal nodes加载edits log以及应用到内存文件目录树中去
+          // 就完成了fsimage和edits log的合并
           loader.loadFSEdits(editIn, lastAppliedTxId + 1, startOpt, recovery);
         } finally {
           // Update lastAppliedTxId even in case of error, since some ops may
@@ -1147,6 +1157,7 @@ public class FSImage implements Closeable {
    * Purge any files in the storage directories that are no longer
    * necessary.
    */
+  // 清理旧的fsimage和edit log
   void purgeOldStorage(NameNodeFile nnf) {
     try {
       archivalManager.purgeOldStorage(nnf);

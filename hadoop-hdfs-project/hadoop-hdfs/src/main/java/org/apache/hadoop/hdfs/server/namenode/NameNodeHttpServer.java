@@ -118,6 +118,7 @@ public class NameNodeHttpServer {
       }
     }
 
+    // 启动hadoop自己实现的HttpServer2
     HttpServer2.Builder builder = DFSUtil.httpServerTemplateForNNAndJN(conf,
         httpAddr, httpsAddr, "hdfs",
         DFSConfigKeys.DFS_NAMENODE_KERBEROS_INTERNAL_SPNEGO_PRINCIPAL_KEY,
@@ -138,6 +139,7 @@ public class NameNodeHttpServer {
 
     httpServer.setAttribute(NAMENODE_ATTRIBUTE_KEY, nn);
     httpServer.setAttribute(JspHelper.CURRENT_CONF, conf);
+    // 设置一些用于处理HTTP请求的Serverlet
     setupServlets(httpServer, conf);
     httpServer.start();
 

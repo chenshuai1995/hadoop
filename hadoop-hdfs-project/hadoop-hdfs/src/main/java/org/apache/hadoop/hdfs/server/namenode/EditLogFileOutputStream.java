@@ -83,6 +83,8 @@ public class EditLogFileOutputStream extends EditLogOutputStream {
     doubleBuf = new EditsDoubleBuffer(size);
     RandomAccessFile rp;
     if (shouldSyncWritesAndSkipFsync) {
+      // 底层都是JAVA IO的内容
+      // 每次都会根据transactionId生产一个文件名
       rp = new RandomAccessFile(name, "rws");
     } else {
       rp = new RandomAccessFile(name, "rw");
@@ -94,6 +96,7 @@ public class EditLogFileOutputStream extends EditLogOutputStream {
 
   @Override
   public void write(FSEditLogOp op) throws IOException {
+    // 内存双缓冲机制的输出
     doubleBuf.writeOp(op);
   }
 
@@ -201,6 +204,7 @@ public class EditLogFileOutputStream extends EditLogOutputStream {
       return;
     }
     preallocate(); // preallocate file if necessary
+    // 调用了double buffer
     doubleBuf.flushTo(fp);
     if (durable && !shouldSkipFsyncForTests && !shouldSyncWritesAndSkipFsync) {
       fc.force(false); // metadata updates not needed

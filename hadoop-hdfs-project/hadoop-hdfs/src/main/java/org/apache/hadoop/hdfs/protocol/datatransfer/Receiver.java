@@ -68,23 +68,30 @@ public abstract class Receiver implements DataTransferProtocol {
   protected final void processOp(Op op) throws IOException {
     switch(op) {
     case READ_BLOCK:
+      // 数据块读
       opReadBlock();
       break;
     case WRITE_BLOCK:
+      // 数据块写
       opWriteBlock(in);
       break;
     case REPLACE_BLOCK:
+      // 数据块替换，是将某个DataNode上的block移动到另外一个DataNode上，主要用于Rebalance
       opReplaceBlock(in);
       break;
     case COPY_BLOCK:
+      // 复制块，在当前的DataNode上复制block，主要用于Rebalance
       opCopyBlock(in);
       break;
     case BLOCK_CHECKSUM:
+      // 读数据块校验，用于读取数据块校验和
       opBlockChecksum(in);
       break;
     case TRANSFER_BLOCK:
+      // 复制block到其他DataNode上，用于副本缺失，数据容错
       opTransferBlock(in);
       break;
+    // 下面3个和短路读有关
     case REQUEST_SHORT_CIRCUIT_FDS:
       opRequestShortCircuitFds(in);
       break;

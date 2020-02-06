@@ -193,10 +193,12 @@ class NameNodeRpcServer implements NamenodeProtocols {
   
   private final boolean serviceAuthEnabled;
 
+  // 和DataNode进行通信
   /** The RPC server that listens to requests from DataNodes */
   private final RPC.Server serviceRpcServer;
   private final InetSocketAddress serviceRPCAddress;
-  
+
+  // 和client进行通信
   /** The RPC server that listens to requests from clients */
   protected final RPC.Server clientRpcServer;
   protected final InetSocketAddress clientRpcAddress;
@@ -216,17 +218,21 @@ class NameNodeRpcServer implements NamenodeProtocols {
     RPC.setProtocolEngine(conf, ClientNamenodeProtocolPB.class,
         ProtobufRpcEngine.class);
 
+    // 当前在hdfs.server.namenode包下，可以猜测是NameNode和其他组件今次那个RPC通信
+    // namenode和client（比如，shell客户端：hdfs dfs -ls /）RPC通信
     ClientNamenodeProtocolServerSideTranslatorPB 
        clientProtocolServerTranslator = 
          new ClientNamenodeProtocolServerSideTranslatorPB(this);
      BlockingService clientNNPbService = ClientNamenodeProtocol.
          newReflectiveBlockingService(clientProtocolServerTranslator);
-    
+
+    // namenode和DataNode进行RPC通信
     DatanodeProtocolServerSideTranslatorPB dnProtoPbTranslator = 
         new DatanodeProtocolServerSideTranslatorPB(this);
     BlockingService dnProtoPbService = DatanodeProtocolService
         .newReflectiveBlockingService(dnProtoPbTranslator);
 
+    // namenode和其他NameNode（HA架构或者联邦架构）进行RPC通信
     NamenodeProtocolServerSideTranslatorPB namenodeProtocolXlator = 
         new NamenodeProtocolServerSideTranslatorPB(this);
     BlockingService NNPbService = NamenodeProtocolService
@@ -321,6 +327,8 @@ class NameNodeRpcServer implements NamenodeProtocols {
       serviceRpcServer = null;
       serviceRPCAddress = null;
     }
+    // fs.defaultFS: file:///
+    // 监听默认端口：8020
     InetSocketAddress rpcAddr = nn.getRpcServerAddress(conf);
     String bindHost = nn.getRpcServerBindHost(conf);
     if (bindHost == null) {
@@ -414,7 +422,9 @@ class NameNodeRpcServer implements NamenodeProtocols {
    * Start client and service RPC servers.
    */
   void start() {
+    // client rpc server 一定会启动
     clientRpcServer.start();
+    // service rpc server 根据前面配置的参数，不一定会启动
     if (serviceRpcServer != null) {
       serviceRpcServer.start();      
     }
@@ -576,6 +586,9 @@ class NameNodeRpcServer implements NamenodeProtocols {
           + MAX_PATH_LENGTH + " characters, " + MAX_PATH_DEPTH + " levels.");
     }
     namesystem.checkOperation(OperationCategory.WRITE);
+    // FSNamesystem.startFile()方法
+    // 完成了文件目录树中新增一个文件的操作
+    // 包括会去写那个edits log
     HdfsFileStatus fileStatus = namesystem.startFile(src, new PermissionStatus(
         getRemoteUser().getShortUserName(), null, masked),
         clientName, clientMachine, flag.get(), createParent, replication,

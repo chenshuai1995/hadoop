@@ -47,6 +47,8 @@ import com.google.common.base.Preconditions;
  * We keep an in-memory representation of the file/block hierarchy.
  * This is a base INode class containing common fields for file and 
  * directory inodes.
+ *
+ * 既可能代表文件，也有可能代表目录
  */
 @InterfaceAudience.Private
 public abstract class INode implements INodeAttributes, Diff.Element<byte[]> {

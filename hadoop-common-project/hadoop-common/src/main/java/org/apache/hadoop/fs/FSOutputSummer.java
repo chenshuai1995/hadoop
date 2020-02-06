@@ -107,6 +107,8 @@ abstract public class FSOutputSummer extends OutputStream {
       throw new ArrayIndexOutOfBoundsException();
     }
 
+    // 每个chunk都有一个checksum，在packet里，其实是有一大堆的chunk和一大堆的checksum，还有一些header
+    // 重点在write1()里
     for (int n=0;n<len;n+=write1(b, off+n, len-n)) {
     }
   }
@@ -120,18 +122,24 @@ abstract public class FSOutputSummer extends OutputStream {
       // local buffer is empty and user buffer size >= local buffer size, so
       // simply checksum the user buffer and send it directly to the underlying
       // stream
+      // 这个意思就是说，你写入的这个字节数组的大小，直接就达到了一个chunk的大小了
+      // 所以此时，就不需要将字节数组的数据写入一个缓冲，直接就将这个字节数组的数据作为一个chunk写入底层的流就可以了
       final int length = buf.length;
+      // 最终调用writeChecksumChunk方法实现
       writeChecksumChunks(b, off, length);
       return length;
     }
     
     // copy user data to local buffer
+    // 或者，如果你当前这个字节数组的数据还没达到一个chunk的大小
+    // 此时可以将这个字节数据的数据先写入一个buffer缓冲中
     int bytesToCopy = buf.length-count;
     bytesToCopy = (len<bytesToCopy) ? len : bytesToCopy;
     System.arraycopy(b, off, buf, count, bytesToCopy);
     count += bytesToCopy;
     if (count == buf.length) {
       // local buffer is full
+      // flush内存缓冲buffer
       flushBuffer();
     } 
     return bytesToCopy;
@@ -201,8 +209,13 @@ abstract public class FSOutputSummer extends OutputStream {
   throws IOException {
     sum.calculateChunkedSums(b, off, len, checksum, 0);
     for (int i = 0; i < len; i += sum.getBytesPerChecksum()) {
+      // 核心的切割chunk算法
+      // 缓冲数据里可以最多放9个chunk数据
+      // 这里的for循环，就是在切割chunk，每个chunk就是512字节。
+      // sum.getBytesPerChecksum()：就是512字节
       int chunkLen = Math.min(sum.getBytesPerChecksum(), len - i);
       int ckOffset = i / sum.getBytesPerChecksum() * getChecksumSize();
+      // 在这里就是把byte[]数组里固定的512字节的数据，写入底层，切割成一个chunk
       writeChunk(b, off + i, chunkLen, checksum, ckOffset, getChecksumSize());
     }
   }

@@ -47,6 +47,9 @@ import com.google.common.base.Preconditions;
 
 /** I-node for closed file. */
 @InterfaceAudience.Private
+/**
+ * INodeFile代表一个文件
+ */
 public class INodeFile extends INodeWithAdditionalFields
     implements INodeFileAttributes, BlockCollection {
 
@@ -115,6 +118,8 @@ public class INodeFile extends INodeWithAdditionalFields
 
   private long header = 0L;
 
+  // 关键：blocks，
+  // 意思说，这个INodeFile文件划分成了哪些block
   private BlockInfo[] blocks;
 
   INodeFile(long id, byte[] name, PermissionStatus permissions, long mtime,

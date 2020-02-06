@@ -57,6 +57,7 @@ import static org.apache.hadoop.util.Time.now;
 
 /**
  * Manage datanodes, include decommission and other activities.
+ * 管理DataNodes，包括下线（decommission），注册，心跳
  */
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
@@ -223,6 +224,8 @@ public class DatanodeManager {
     final int heartbeatRecheckInterval = conf.getInt(
         DFSConfigKeys.DFS_NAMENODE_HEARTBEAT_RECHECK_INTERVAL_KEY, 
         DFSConfigKeys.DFS_NAMENODE_HEARTBEAT_RECHECK_INTERVAL_DEFAULT); // 5 minutes
+    // 2 * 5 * 60 * 1000 + 10 * 1000 * 3
+    // 10分钟 + 30秒
     this.heartbeatExpireInterval = 2 * heartbeatRecheckInterval
         + 10 * 1000 * heartbeatIntervalSeconds;
     final int blockInvalidateLimit = Math.max(20*(int)(heartbeatIntervalSeconds),
@@ -564,12 +567,23 @@ public class DatanodeManager {
 
   /** Is the datanode dead? */
   boolean isDatanodeDead(DatanodeDescriptor node) {
+    // 使用了关键的属性，lastUpdate
+    // 如果上次心跳的时间 < 当前时间 - 心跳过期的间隔
+    // 两次心跳时间超过了一定的间隔，就会认为这个datanode已经宕机了，默认的间隔是10分钟+30秒
+    // 这边其实是大概来说如果一个datanode超过10分钟多钟都还没有发送心跳的话，此时就会认为这个datanode已经宕机了
     return (node.getLastUpdate() <
             (Time.now() - heartbeatExpireInterval));
   }
 
   /** Add a datanode. */
   void addDatanode(final DatanodeDescriptor node) {
+    // 这块东西才是最最核心的注册datanode的一段逻辑
+    // 注册一个datanode逻辑很简单，无非就是封装一个代表了datanode的DatanodeDescriptor对象
+    // 然后将这个东西放入了几个map中
+    // datanodeMap<datanodeUuid, datanode>
+    // networkTopolocy
+    // host2DatanodeMap<ipAddr, datanode>
+
     // To keep host2DatanodeMap consistent with datanodeMap,
     // remove  from host2DatanodeMap the datanodeDescriptor removed
     // from datanodeMap before adding node to host2DatanodeMap.
@@ -904,7 +918,10 @@ public class DatanodeManager {
         
       NameNode.stateChangeLog.info("BLOCK* registerDatanode: from "
           + nodeReg + " storage " + nodeReg.getDatanodeUuid());
-  
+
+      // 如果过多的去解释这个里面的逻辑，很难说清楚
+      // 大家现在对很多东西都还没搞清楚，所以我这里简短说一下，从两个map里面都获取了一个DatanodeDescriptor的对象
+      // 正常情况下，如果是第一次刚刚来注册的datanode，这里获取到的nodeS和nodeN，肯定都是null
       DatanodeDescriptor nodeS = getDatanode(nodeReg.getDatanodeUuid());
       DatanodeDescriptor nodeN = host2DatanodeMap.getDatanodeByXferAddr(
           nodeReg.getIpAddr(), nodeReg.getXferPort());
@@ -982,6 +999,9 @@ public class DatanodeManager {
         return;
       }
 
+      // 正常来说，第一次注册datanode，源码应该是走到这里来的
+      // 为这个注册过来的datanode，封装和创建一个DatanodeDescriptor对象
+      // 这个东西其实就是在namenode这一边代表了一个datanode
       DatanodeDescriptor nodeDescr 
         = new DatanodeDescriptor(nodeReg, NetworkTopology.DEFAULT_RACK);
       boolean success = false;
@@ -996,16 +1016,26 @@ public class DatanodeManager {
           nodeDescr.setDependentHostNames(
               getNetworkDependenciesWithDefault(nodeDescr));
         }
+        // 这里的意思大概就是将这个datanode放入了集群拓扑的对象里面
         networktopology.add(nodeDescr);
         nodeDescr.setSoftwareVersion(nodeReg.getSoftwareVersion());
   
         // register new datanode
+        // 注册一个新的datanode
         addDatanode(nodeDescr);
+        // 检查一下，我们在部署hdfs的时候，有一个文件，可以在里面加入哪些datanode是要下线的
+        // 这边其实就是检查一下，可能某个datanode是要下线
         checkDecommissioning(nodeDescr);
         
         // also treat the registration message as a heartbeat
         // no need to update its timestamp
         // because its is done when the descriptor is created
+
+        // HeartbeatManager
+        // 是用来管理datanode后续发送的心跳的
+        // 这个东西是用来监控，如果你在一定时间范围内没有发送心跳过来，就认为datanode死掉了
+        // 就会将这个datanode摘除
+        // 注册datanode之后，如果注册成功了，此时就会将这个datanode加入HeartbeatManager的管辖范围内
         heartbeatManager.addDatanode(nodeDescr);
         success = true;
         incrementVersionCount(nodeReg.getSoftwareVersion());
@@ -1382,6 +1412,8 @@ public class DatanodeManager {
           return new DatanodeCommand[]{RegisterCommand.REGISTER};
         }
 
+        // HeartbeatManager底层就是调用了对应的那个DatanodeDescriptor他的处理心跳的方法
+        // DatanodeDesciptor无非就是在更新一些磁盘使用空间的数据，更新了一下最近一次进行心跳的时间
         heartbeatManager.updateHeartbeat(nodeinfo, reports,
                                          cacheCapacity, cacheUsed,
                                          xceiverCount, failedVolumes);
@@ -1391,6 +1423,17 @@ public class DatanodeManager {
         if(namesystem.isInSafeMode()) {
           return new DatanodeCommand[0];
         }
+
+        // 下面的那坨逻辑
+        // 主要就是namenode在判断，这次datanode不是给我发送过来了一次心跳吗？
+        // 我这里判断一下，当前是否有需要这个datanode执行的任务
+        // Command
+        // 比如说namenode发现我现在需要这个datanode去复制一个block副本给其他的datanode
+        // 此时就会可能会在这里返回一个command给datanode
+        // datanode发送心跳之后，会收到namenode给他返回的一系列的command，就会去执行那些command
+
+        // 我们这边是不能在这里给大家来讲解的，我们可以在后面block管理的时候，集群容错机制的源码的时候
+        // 才会来看到这里的源码
 
         //check lease recovery
         BlockInfoUnderConstruction[] blocks = nodeinfo
@@ -1436,12 +1479,14 @@ public class DatanodeManager {
         List<BlockTargetPair> pendingList = nodeinfo.getReplicationCommand(
               maxTransfers);
         if (pendingList != null) {
+          // 复制指令
           cmds.add(new BlockCommand(DatanodeProtocol.DNA_TRANSFER, blockPoolId,
               pendingList));
         }
         //check block invalidation
         Block[] blks = nodeinfo.getInvalidateBlocks(blockInvalidateLimit);
         if (blks != null) {
+          // 删除指令
           cmds.add(new BlockCommand(DatanodeProtocol.DNA_INVALIDATE,
               blockPoolId, blks));
         }
@@ -1450,6 +1495,7 @@ public class DatanodeManager {
         if (shouldSendCachingCommands && 
             ((nowMs - nodeinfo.getLastCachingDirectiveSentTimeMs()) >=
                 timeBetweenResendingCachingDirectivesMs)) {
+          // 缓存指令
           DatanodeCommand pendingCacheCommand =
               getCacheCommand(nodeinfo.getPendingCached(), nodeinfo,
                 DatanodeProtocol.DNA_CACHE, blockPoolId);

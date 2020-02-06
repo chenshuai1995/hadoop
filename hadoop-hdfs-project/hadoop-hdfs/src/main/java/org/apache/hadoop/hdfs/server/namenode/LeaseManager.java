@@ -79,16 +79,26 @@ public class LeaseManager {
   // Used for handling lock-leases
   // Mapping: leaseHolder -> Lease
   //
+  // TreeMap，底层是红黑树保存的集合数据结构
+  // 特点是放入里面的数据可以默认自动根据key的自然大小来排序
+  // 排序好了以后，下次你如果遍历TreeMap的时候，就是根据key自然大小排序后的顺序来遍历的
+  // 一个Lease就是代表了某个客户端对一个文件拥有的契约
+  // key是客户端名称，value是客户端的lease契约
   private final SortedMap<String, Lease> leases = new TreeMap<String, Lease>();
   // Set of: Lease
+  // 默认根据Lease来自然排序了
+  // 默认是根据lease的lastUpdate续约时间来排序，如果一样，就根据客户端名称来排序
   private final NavigableSet<Lease> sortedLeases = new TreeSet<Lease>();
 
   // 
   // Map path names to leases. It is protected by the sortedLeases lock.
   // The map stores pathnames in lexicographical order.
   //
+  // 根据path来排序的契约数据
+  // key是文件的路径名，默认根据文件路径名排序
   private final SortedMap<String, Lease> sortedLeasesByPath = new TreeMap<String, Lease>();
 
+  // 核心：Daemon
   private Daemon lmthread;
   private volatile boolean shouldRunMonitor;
 
@@ -156,14 +166,20 @@ public class LeaseManager {
    * Adds (or re-adds) the lease for the specified file.
    */
   synchronized Lease addLease(String holder, String src) {
+    // holder代表客户端的名字
+
     Lease lease = getLease(holder);
     if (lease == null) {
+      // 直接构造一个内部类，Lease对象，传入进去客户端的名称
       lease = new Lease(holder);
+      // 直接以<客户端名称， Lease契约>的key-value对格式，将他放入leases数据结构中
       leases.put(holder, lease);
+      // 同时将Lease数据放入了一个sortedLease数据结构
       sortedLeases.add(lease);
     } else {
       renewLease(lease);
     }
+    // key是文件的路径名，默认根据文件路径名排序
     sortedLeasesByPath.put(src, lease);
     lease.paths.add(src);
     return lease;
@@ -221,6 +237,7 @@ public class LeaseManager {
   /**
    * Renew the lease(s) held by the given client
    */
+  // renew：续约
   synchronized void renewLease(String holder) {
     renewLease(getLease(holder));
   }
@@ -249,8 +266,11 @@ public class LeaseManager {
    * expire, all the corresponding locks can be released.
    *************************************************************/
   class Lease implements Comparable<Lease> {
+    // holder，哪个客户端持有的这份契约
     private final String holder;
+    // 最近一次进行续约的时间
     private long lastUpdate;
+    // 这个客户端在这份契约里针对哪些文件声明了自己的所有权
     private final Collection<String> paths = new TreeSet<String>();
   
     /** Only LeaseManager object can create a lease */
@@ -406,6 +426,7 @@ public class LeaseManager {
    * Monitor checks for leases that have expired,
    * and disposes of them.
    ******************************************************/
+  // 后台线程，监控各个lease契约
   class Monitor implements Runnable {
     final String name = getClass().getSimpleName();
 
@@ -418,6 +439,9 @@ public class LeaseManager {
           fsnamesystem.writeLockInterruptibly();
           try {
             if (!fsnamesystem.isInSafeMode()) {
+              // 检查契约的核心逻辑，是在checkLeases()方法里
+              // 在这个检查契约的逻辑中，可能会触发一些写edits log元数据的操作
+              // 如果触发了的话，还让edits log sync一下
               needSync = checkLeases();
             }
           } finally {
@@ -474,6 +498,7 @@ public class LeaseManager {
     } catch(NoSuchElementException e) {}
 
     while(leaseToCheck != null) {
+      // 核心逻辑：检查是否超期
       if (!leaseToCheck.expiredHardLimit()) {
         break;
       }

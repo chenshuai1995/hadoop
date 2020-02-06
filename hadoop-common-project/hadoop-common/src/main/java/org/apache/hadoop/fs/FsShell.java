@@ -280,10 +280,12 @@ public class FsShell extends Configured implements Tool {
       String cmd = argv[0];
       Command instance = null;
       try {
+        // 这里的Command会根据cmd反射实例化成对应的Command，如org.apache.hadoop.fs.shell.Ls
         instance = commandFactory.getInstance(cmd);
         if (instance == null) {
           throw new UnknownCommandException();
         }
+        // 最终具体的逻辑，由子类org.apache.hadoop.fs.shell.Ls.processPath()实现
         exitCode = instance.run(Arrays.copyOfRange(argv, 1, argv.length));
       } catch (IllegalArgumentException e) {
         displayError(cmd, e.getLocalizedMessage());
@@ -331,12 +333,18 @@ public class FsShell extends Configured implements Tool {
    * @throws Exception upon error
    */
   public static void main(String argv[]) throws Exception {
+    // 根据hadoop-hdfs-project/hadoop-hdfs/src/main/bin/hdfs路径下的hdfs
+    // 中elif [ "$COMMAND" = "dfs" ] ; then
+    //     CLASS=org.apache.hadoop.fs.FsShell
+    // 判断出在shell中执行hdfs dfs -mkdir /usr这种命令，只执行的FsShell类
     FsShell shell = newShellInstance();
     Configuration conf = new Configuration();
     conf.setQuietMode(false);
     shell.setConf(conf);
     int res;
     try {
+      // 这里最终会执行到tool.run，也就是这里的shell.run
+      // 既FsShell.run()
       res = ToolRunner.run(shell, argv);
     } finally {
       shell.close();

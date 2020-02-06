@@ -71,6 +71,9 @@ import com.google.common.util.concurrent.UncaughtExceptionHandlers;
  * {@link ListenableFuture} instances to wait for their result.
  * This allows calls to be bound together using the {@link QuorumCall}
  * class.
+ *
+ * 实际的AsyncLogger的实现类，是IPCLoggerChannel，他是通过RPC调用发送edit log的
+ *
  */
 @InterfaceAudience.Private
 public class IPCLoggerChannel implements AsyncLogger {
@@ -83,6 +86,9 @@ public class IPCLoggerChannel implements AsyncLogger {
    * Executes tasks submitted to it serially, on a single thread, in FIFO order
    * (generally used for write tasks that should not be reordered).
    */
+  // 每个AsyncLogger其实都有一个自己的单线程的线程池
+  // 他在里面发送请求的时候，就可以基于这个单线程的线程池来异步执行请求任务
+  // 外面调用他的人，就可以获取到对应的Future来监听异步执行的结果
   private final ListeningExecutorService singleThreadExecutor;
   /**
    * Executes tasks submitted to it in parallel with each other and with those
@@ -382,6 +388,9 @@ public class IPCLoggerChannel implements AsyncLogger {
 
           long rpcSendTimeNanos = System.nanoTime();
           try {
+            // 往journal node推送数据的核心代码
+            // 通过journal node的rpc代理，实现了journal node rpc接口协议
+            // 通过这个代理，调用jounal()接口
             getProxy().journal(createReqInfo(),
                 segmentTxId, firstTxnId, numTxns, data);
           } catch (IOException e) {

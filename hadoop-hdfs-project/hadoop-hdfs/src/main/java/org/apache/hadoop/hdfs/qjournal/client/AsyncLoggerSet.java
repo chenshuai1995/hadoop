@@ -122,13 +122,16 @@ class AsyncLoggerSet {
    */
   <V> Map<AsyncLogger, V> waitForWriteQuorum(QuorumCall<AsyncLogger, V> q,
       int timeoutMs, String operationName) throws IOException {
+    // n/2 + 1
     int majority = getMajoritySize();
     try {
+      // Quorum算法
       q.waitFor(
-          loggers.size(), // either all respond 
-          majority, // or we get a majority successes
-          majority, // or we get a majority failures,
-          timeoutMs, operationName);
+          loggers.size(), // either all respond, 3
+          majority, // or we get a majority successes, 2
+          majority, // or we get a majority failures, 2
+          timeoutMs, // 超时时间, 20s
+          operationName);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted waiting " + timeoutMs + "ms for a " +
@@ -252,8 +255,11 @@ class AsyncLoggerSet {
   
   public QuorumCall<AsyncLogger, Void> sendEdits(
       long segmentTxId, long firstTxnId, int numTxns, byte[] data) {
+    // 每个AsyncLogger会对应一个journal node来发送数据
+    // 所以每个AsyncLogger都会对应一个ListenableFuture，用于监听异步发送的结果
     Map<AsyncLogger, ListenableFuture<Void>> calls = Maps.newHashMap();
     for (AsyncLogger logger : loggers) {
+      // 通过rpc调用发送到journal node上去
       ListenableFuture<Void> future = 
         logger.sendEdits(segmentTxId, firstTxnId, numTxns, data);
       calls.put(logger, future);

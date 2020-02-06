@@ -106,13 +106,32 @@ class QuorumCall<KEY, RESULT> {
       int minResponses, int minSuccesses, int maxExceptions,
       int millis, String operationName)
       throws InterruptedException, TimeoutException {
+
+    // 总结一下：
+    // 刚开始如果没拿到指定数量的响应，会等到个五六秒，后面通过这个算法，大致可能会每隔一两秒，就会检查一下
+    // 就会走一个while循环，来检查一下是否有指定数量的journalnodes返回的响应
+    // 如果说有指定数量的journalnodes响应，就会正常退出while循环，不管是成功还是失败，只要你给响应就可以了
+    // 但是一旦在20秒内，没有指定数量的journalnodes给出响应，直接救护抛出TimeoutException
+    // 就会导致NameNode宕机
+    // 此时就可能是认为journalnodes集群整体崩溃了，宕机了，比如3台journalnodes中宕机了2台，始终无法拿到指定数量的响应
+
+    // minResponses = 3，必须要等到3个journal nodes都给回应才行，哪怕是同步失败也可以
+    // minSuccess = 2，必须至少有2个journal nodes是写入成功的
+    // minExceptions = 2，最多只能有2个jounal nodes是写入失败的
+    // millis = 20s，必须在20s内方法返回
+
+    // 进入方法的时间
     long st = Time.monotonicNow();
+    // 如果等待时间达到20s * 0.3 = 6s，开始输出一些日志
     long nextLogTime = st + (long)(millis * WAIT_PROGRESS_INFO_THRESHOLD);
     long et = st + millis;
     while (true) {
       checkAssertionErrors();
+      // 第一种情况：响应（成功或失败）>= 3，可以退出循环
       if (minResponses > 0 && countResponses() >= minResponses) return;
+      // 第二种情况：写入成功的 >= 2，可以退出循环
       if (minSuccesses > 0 && countSuccesses() >= minSuccesses) return;
+      // 第三种情况：写入失败的 >= 2，可以退出循环
       if (maxExceptions >= 0 && countExceptions() > maxExceptions) return;
       long now = Time.monotonicNow();
       
@@ -138,6 +157,7 @@ class QuorumCall<KEY, RESULT> {
         nextLogTime = now + WAIT_PROGRESS_INTERVAL_MILLIS;
       }
       long rem = et - now;
+      // 如果超时了20s
       if (rem <= 0) {
         throw new TimeoutException();
       }

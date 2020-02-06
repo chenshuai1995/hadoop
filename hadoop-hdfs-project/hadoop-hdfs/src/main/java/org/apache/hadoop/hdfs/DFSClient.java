@@ -230,9 +230,16 @@ import com.google.common.net.InetAddresses;
  * to communicate with a NameNode daemon, and connects 
  * directly to DataNodes to read/write block data.
  *
+ * DFSClient可以连接HDFS集群，并且执行基础的文件操作。
+ * DFSClient使用ClientProtocol（RPC协议）去和NameNode进程通信，
+ * 并且直接连接DataNode去读写block数据
+ *
  * Hadoop DFS users should obtain an instance of 
  * DistributedFileSystem, which uses DFSClient to handle
  * filesystem tasks.
+ *
+ * Hadoop DFS的用户应该拿到一个DistributedFileSystem的实例，
+ * DistributedFileSystem实例使用DFSClient去处理文件操作.
  *
  ********************************************************/
 @InterfaceAudience.Private
@@ -1637,6 +1644,7 @@ public class DFSClient implements java.io.Closeable, RemotePeerFactory,
                              int buffersize,
                              ChecksumOpt checksumOpt,
                              InetSocketAddress[] favoredNodes) throws IOException {
+    // 检查流是否关闭
     checkOpen();
     if (permission == null) {
       permission = FsPermission.getFileDefault();
@@ -1654,10 +1662,23 @@ public class DFSClient implements java.io.Closeable, RemotePeerFactory,
                          + favoredNodes[i].getPort();
       }
     }
+    // 完成了一个DFSOutputStream输出流的创建
+    // 这里面的逻辑比较复杂，源码入口
     final DFSOutputStream result = DFSOutputStream.newStreamForCreate(this,
         src, masked, flag, createParent, replication, blockSize, progress,
         buffersize, dfsClientConf.createChecksum(checksumOpt),
         favoredNodeStrs);
+    // 开启一个文件的契约（租约）
+    // 在hdfs里，同一时间对同一个文件，只能有一个hdfs客户端来写入
+    // 类似于一个全局锁的东西
+    // 就是说，某个hdfs客户端想要写入一个文件，首先先要和namenode申请一个契约（Lease）
+    // 申请到了这个契约以后，在契约的有效期内，这个客户端就可以独享一个文件的写入
+    // 其他的客户端只能等待
+    //
+    // 一开始在这里说的是，申请契约，这个说法不准确，因为其实在创建文件的过程中
+    // 在namenode端，直接就开启了一个契约
+    // 在这里其实是hdfs客户端这块，开启文件续约，定期去发送请求给namenode进行续约
+    // 如果不定期续约的话，namenode端就会检查，发现1小时没续约，直接就可以释放契约了
     beginFileLease(result.getFileId(), result);
     return result;
   }

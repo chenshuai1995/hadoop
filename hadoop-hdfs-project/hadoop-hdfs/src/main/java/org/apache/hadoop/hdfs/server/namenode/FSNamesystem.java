@@ -433,6 +433,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
   // Block pool ID used by this namenode
   private String blockPoolId;
 
+  // 在namenode启动的时候
+  // FSNamesystem初始化的时候，LeaseManager直接就初始化了
   final LeaseManager leaseManager = new LeaseManager(this); 
 
   volatile Daemon smmthread = null;  // SafeModeMonitor thread
@@ -719,6 +721,9 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Instantiates an FSNamesystem loaded from the image and edits
    * directories specified in the passed Configuration.
    *
+   * 实例化一个FSNamesystem，这个数据是从磁盘上加载的image和edits文件
+   * 从哪个目录下去加载呢？通过我们在hdfs配置文件里配置的那个路径下的文件去加载，如果不配置的话，那就是用默认的路径
+   *
    * @param conf the Configuration which specifies the storage directories
    *             from which to load
    * @return an FSNamesystem which contains the loaded namespace
@@ -728,8 +733,11 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
     checkConfiguration(conf);
     FSImage fsImage = new FSImage(conf,
+        // image的路径：file://tmp/hadoop-root/dfs/name
         FSNamesystem.getNamespaceDirs(conf),
+        // editlog路径：file://tmp/hadoop-root/dfs/name
         FSNamesystem.getNamespaceEditsDirs(conf));
+    // 根据给定的fsImage创建FSNamesystem实例，注意：不会从磁盘上加载任何数据
     FSNamesystem namesystem = new FSNamesystem(conf, fsImage, false);
     StartupOption startOpt = NameNode.getStartupOption(conf);
     if (startOpt == StartupOption.RECOVER) {
@@ -738,6 +746,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
 
     long loadStart = now();
     try {
+      // TODO jim 加载image数据
       namesystem.loadFSImage(startOpt);
     } catch (IOException ioe) {
       LOG.warn("Encountered exception loading fsimage", ioe);
@@ -1020,6 +1029,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       // We shouldn't be calling saveNamespace if we've come up in standby state.
       MetaRecoveryContext recovery = startOpt.createRecoveryContext();
       final boolean staleImage
+          //调用FSImage.recoverTransitionRead()
           = fsImage.recoverTransitionRead(startOpt, this, recovery);
       if (RollingUpgradeStartupOption.ROLLBACK.matches(startOpt) ||
           RollingUpgradeStartupOption.DOWNGRADE.matches(startOpt)) {
@@ -1030,6 +1040,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
           + " (staleImage=" + staleImage + ", haEnabled=" + haEnabled
           + ", isRollingUpgrade=" + isRollingUpgrade() + ")");
       if (needToSave) {
+        // 完成了合并，就会将数据写入到新的fsimage文件里去
         fsImage.saveNamespace(this);
       } else {
         updateStorageVersionForRollingUpgrade(fsImage.getLayoutVersion(),
@@ -1102,14 +1113,25 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     writeLock();
     this.haContext = haContext;
     try {
+      // 创建一个NameNode资源检查器
       nnResourceChecker = new NameNodeResourceChecker(conf);
+      // 检查目录下磁盘是否有充足可用空间，默认是100MB
       checkAvailableResources();
+      // saveMode相关逻辑
       assert safeMode != null && !isPopulatingReplQueues();
       StartupProgress prog = NameNode.getStartupProgress();
+      // 设置NameNode的启动进度的开始阶段为SAFEMODE
       prog.beginPhase(Phase.SAFEMODE);
+      /**
+       * block在构造期间的状态
+       * @see BlockUCState
+       */
       prog.setTotal(Phase.SAFEMODE, STEP_AWAITING_REPORTED_BLOCKS,
+        // 获取状态为Complete的block数量
         getCompleteBlocksTotal());
+      // safeMode的核心逻辑：设置block
       setBlockTotal();
+      // 启动BlockManager的一些后台线程
       blockManager.activate(conf);
     } finally {
       writeUnlock();
@@ -1137,6 +1159,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Start services required in active state
    * @throws IOException
    */
+  // namenode启动的时候，会初始化FSNamesystem，同时启动他后台的一些线程
   void startActiveServices() throws IOException {
     startingActiveService = true;
     LOG.info("Starting services required for active state");
@@ -1188,6 +1211,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         // Give them all a fresh start here.
         leaseManager.renewAllLeases();
       }
+      // 启动LeaseManager的后台线程
       leaseManager.startMonitor();
       startSecretManagerIfNecessary();
 
@@ -2629,6 +2653,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       checkOperation(OperationCategory.WRITE);
       checkNameNodeSafeMode("Cannot create file" + src);
       src = resolvePath(src, pathComponents);
+      // 判断应该是这个方法在内存的文件目录树中加入了一个文件
       toRemoveBlocks = startFileInternal(pc, src, permissions, holder, 
           clientMachine, create, overwrite, createParent, replication, 
           blockSize, isLazyPersist, suite, protocolVersion, edek, logRetryCache);
@@ -2747,6 +2772,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       Path parent = new Path(src).getParent();
       if (parent != null && mkdirsRecursively(parent.toString(),
               permissions, true, now())) {
+        // 核心的代码
         newNode = dir.addFile(src, permissions, replication, blockSize,
                               holder, clientMachine);
       }
@@ -2754,6 +2780,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       if (newNode == null) {
         throw new IOException("Unable to add " + src +  " to namespace");
       }
+      // 契约管理器
+      // 自动给这个客户端针对这个文件添加了一个契约
       leaseManager.addLease(newNode.getFileUnderConstructionFeature()
           .getClientName(), src);
 
@@ -2766,6 +2794,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       setNewINodeStoragePolicy(newNode, iip, isLazyPersist);
 
       // record file record in log, record new generation stamp
+      // 写入edits log
       getEditLog().logOpenFile(src, newNode, overwrite, logRetryEntry);
       if (NameNode.stateChangeLog.isDebugEnabled()) {
         NameNode.stateChangeLog.debug("DIR* NameSystem.startFile: added " +
@@ -3242,6 +3271,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     }
 
     // choose targets for the new block to be allocated.
+    // 在这里为一个新的block选择了一批机器，DataNode
+    // 这里遵循的就是机架感知的特性
     final DatanodeStorageInfo targets[] = getBlockManager().chooseTarget4NewBlock( 
         src, replication, clientNode, excludedNodes, blockSize, favoredNodes,
         storagePolicyID);
@@ -3691,7 +3722,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    * Save allocated block at the given pending filename
    * 
    * @param src path to the file
-   * @param inodesInPath representing each of the components of src.
+   * @param inodes inodesInPath representing each of the components of src.
    *                     The last INode is the INode for {@code src} file.
    * @param newBlock newly allocated block to be save
    * @param targets target datanodes where replicas of the new block is placed
@@ -4247,16 +4278,23 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     if (!DFSUtil.isValidName(src)) {
       throw new InvalidPathException(src);
     }
+    // 检查权限
     FSPermissionChecker pc = getPermissionChecker();
     checkOperation(OperationCategory.WRITE);
+    // FSDirectory猜测是一个管理内存文件目录树的组件
+    // 调用方法将src有层级结构的目录转换成二维数组
     byte[][] pathComponents = FSDirectory.getPathComponentsForReservedPath(src);
     HdfsFileStatus resultingStat = null;
     boolean status = false;
+    // 下面加写锁的逻辑
+    // 1. 在内存中创建目录
+    // 2. 写edit log 到内存缓冲中，记录本次的元数据操作
     writeLock();
     try {
       checkOperation(OperationCategory.WRITE);   
       checkNameNodeSafeMode("Cannot create directory " + src);
       src = resolvePath(src, pathComponents);
+      // 创建目录的核心代码
       status = mkdirsInternal(pc, src, permissions, createParent);
       if (status) {
         resultingStat = getAuditFileInfo(src, false);
@@ -4264,6 +4302,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     } finally {
       writeUnlock();
     }
+    // 3. 释放写锁后，强制edit log sync 到磁盘上
+    // 分段加锁 + 双缓冲队列
     getEditLog().logSync();
     if (status) {
       logAuditEvent(true, "mkdirs", srcArg, null, resultingStat);
@@ -4298,6 +4338,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     // create multiple inodes.
     checkFsObjectLimit();
 
+    // 创建预留的目录
     if (!mkdirsRecursively(src, permissions, false, now())) {
       throw new IOException("Failed to create directory: " + src);
     }
@@ -4340,6 +4381,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       INode[] inodes = iip.getINodes();
 
       // find the index of the first null in inodes[]
+      // 找到目录中的inode[]中，第一个为null 的下标
+      // 如[/usr, /warehouse, null] -> index = 2
       StringBuilder pathbuilder = new StringBuilder();
       int i = 1;
       for(; i < inodes.length && inodes[i] != null; i++) {
@@ -4385,9 +4428,11 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       }
 
       // create directories beginning from the first null index
+      // 从上次的循环中的null的下标，开始创建目录
       for(; i < inodes.length; i++) {
         pathbuilder.append(Path.SEPARATOR).
             append(DFSUtil.bytes2String(components[i]));
+        // 真正的核心逻辑，调用FSDirectory的方法
         dir.unprotectedMkdir(allocateNewInodeId(), iip, i, components[i],
                 (i < lastInodeIndex) ? parentPermissions : permissions, null,
                 now);
@@ -4399,6 +4444,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
         NameNode.getNameNodeMetrics().incrFilesCreated();
 
         final String cur = pathbuilder.toString();
+        // 在editlog中记录mkdir的操作
         getEditLog().logMkDir(cur, inodes[i]);
         if(NameNode.stateChangeLog.isDebugEnabled()) {
           NameNode.stateChangeLog.debug(
@@ -5084,6 +5130,8 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       //get datanode commands
       final int maxTransfer = blockManager.getMaxReplicationStreams()
           - xmitsInProgress;
+      // DatanodeManager顾名思义，本来就是负责管理datanode的
+      // 人家现在datanode发送了心跳过来，肯定是DatanodeManager来进行处理的
       DatanodeCommand[] cmds = blockManager.getDatanodeManager().handleHeartbeat(
           nodeReg, reports, blockPoolId, cacheCapacity, cacheUsed,
           xceiverCount, maxTransfer, failedVolumes);
@@ -5652,7 +5700,13 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
    */
   public class SafeModeInfo {
     // configuration fields
-    /** Safe mode threshold condition %.*/
+    /**
+     * Safe mode threshold condition %.
+     *
+     * 1. 在safeMode自动进入时，为0.999f
+     * 2. 在safeMode手动进入时，为1.5f
+     *
+     */
     private final double threshold;
     /** Safe mode minimum number of datanodes alive */
     private final int datanodeThreshold;
@@ -5664,7 +5718,14 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     private volatile int extension;
     /** Min replication required by safe mode. */
     private final int safeReplication;
-    /** threshold for populating needed replication queues */
+    /**
+     * threshold for populating needed replication queues
+     * (复制队列中需要的占据的block数量的阈值)
+     *
+     * 1. 在safeMode自动进入时，为0.999f
+     * 2. 在safeMode手动进入时，为1.5f
+     *
+     */
     private final double replQueueThreshold;
     // internal fields
     /** Time when threshold was reached.
@@ -5673,9 +5734,21 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
      * <br> >0 safe mode is on, but we are in extension period 
      */
     private long reached = -1;  
-    /** Total number of blocks. */
+    /**
+     * Total number of blocks.
+     *
+     * 1. safeMode自动进入时，blockSafe = 0;
+     * 2. safeMode手动进入时，blockSafe = -1;
+     *
+     */
     int blockTotal; 
-    /** Number of safe blocks. */
+    /**
+     * Number of safe blocks.
+     *
+     * 1. safeMode自动进入时，blockSafe = 0;
+     * 2. safeMode手动进入时，blockSafe = -1;
+     *
+     */
     int blockSafe;
     /** Number of blocks needed to satisfy safe mode threshold condition */
     private int blockThreshold;
@@ -5852,6 +5925,17 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
      * if DFS is empty or {@link #threshold} == 0
      */
     private boolean needEnter() {
+      /**
+       * threshold = 0.99f
+       * blockSafe = 0
+       * blockThreshold = (int) (blockTotal * threshold) = 0;
+       *
+       */
+      // 条件1： 在safeMode下的block数量要小于状态为COMPLETE的block数量*阈值0.99 -> 进入安全模式
+      // 或者
+      // 条件2： 在safeMode下DataNode存活的阈值最小数量不小于0 且 真正存活的DataNode数量要小于阈值 -> 进入安全模式
+      // 或者
+      // 条件3： NameNode没有充足的可用资源，如磁盘 -> 进入安全模式
       return (threshold != 0 && blockSafe < blockThreshold) ||
         (datanodeThreshold != 0 && getNumLiveDataNodes() < datanodeThreshold) ||
         (!nameNodeHasResourcesAvailable());
@@ -5869,6 +5953,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       }
       // if smmthread is already running, the block threshold must have been 
       // reached before, there is no need to enter the safe mode again
+      // 其实在这个needEnter()方法中就是在检查是否要进入安全模式
       if (smmthread == null && needEnter()) {
         enter();
         // check if we are ready to initialize replication queues
@@ -5892,6 +5977,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       // start monitor
       reached = now();
       if (smmthread == null) {
+        // 监控safeMode状态的线程
         smmthread = new Daemon(new SafeModeMonitor());
         smmthread.start();
         reportStatus("STATE* Safe mode extension entered.", true);
@@ -5907,8 +5993,11 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
      * Set total number of blocks.
      */
     private synchronized void setBlockTotal(int total) {
+      // blockTotal: 状态为COMPLETE的block数量
       this.blockTotal = total;
+      // safeMode下block数量的阈值
       this.blockThreshold = (int) (blockTotal * threshold);
+      // safeMode下ReplQueue数量的阈值
       this.blockReplQueueThreshold = 
         (int) (blockTotal * replQueueThreshold);
       if (haEnabled) {
@@ -5919,6 +6008,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
       }
       if(blockSafe < 0)
         this.blockSafe = 0;
+      // 检查safeMode，并触发
       checkMode();
     }
       
@@ -6264,6 +6354,7 @@ public class FSNamesystem implements Namesystem, FSClusterStats,
     SafeModeInfo safeMode = this.safeMode;
     if (safeMode == null)
       return;
+    // 设置当前safeMode的block
     safeMode.setBlockTotal((int)getCompleteBlocksTotal());
   }
 

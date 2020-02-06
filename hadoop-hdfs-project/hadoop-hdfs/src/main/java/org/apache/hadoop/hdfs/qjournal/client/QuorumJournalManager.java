@@ -94,7 +94,10 @@ public class QuorumJournalManager implements JournalManager {
   private final URI uri;
   private final NamespaceInfo nsInfo;
   private boolean isActiveWriter;
-  
+
+  // 里面封装了多个AsyncLogger
+  // 在flush的时候，通过这个组件，里面每个AsyncLogger都会往一个journalnode发送edit log
+  // 这里会封装quorum(不是Paxos)算法，大多数的journal node都写成功了，就算成功
   private final AsyncLoggerSet loggers;
 
   private int outputBufferCapacity = 512 * 1024;
@@ -402,6 +405,7 @@ public class QuorumJournalManager implements JournalManager {
         layoutVersion);
     loggers.waitForWriteQuorum(q, startSegmentTimeoutMs,
         "startLogSegment(" + txId + ")");
+    // 这里返回的是QuorumOutputStream
     return new QuorumOutputStream(loggers, txId,
         outputBufferCapacity, writeTxnsTimeoutMs);
   }

@@ -33,7 +33,11 @@ import com.google.common.base.Preconditions;
 
 /**
  * Storing all the {@link INode}s and maintaining the mapping between INode ID
- * and INode.  
+ * and INode.
+ *
+ * 存储所有inode，并且维护一份inode id和inode之间的映射关系
+ * inodeId -> inode
+ *
  */
 public class INodeMap {
   

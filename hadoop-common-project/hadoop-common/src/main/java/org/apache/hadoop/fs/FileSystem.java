@@ -74,6 +74,10 @@ import com.google.common.annotations.VisibleForTesting;
  * one that reflects the locally-connected disk.  The local version
  * exists for small Hadoop instances and for testing.
  *
+ * 针对一般文件系统的一个抽象基类。
+ * 它可以实现作为一个分布式文件系统， 或者作为一个本地的用来反映本地连接的磁盘的。
+ * 这个本地版本存在于小的Hadoop实例和测试中。
+ *
  * <p>
  *
  * All user code that may potentially use the Hadoop Distributed
@@ -85,6 +89,8 @@ import com.google.common.annotations.VisibleForTesting;
  * <p>
  * The local implementation is {@link LocalFileSystem} and distributed
  * implementation is DistributedFileSystem.
+ *
+ * 这里可以看出分布式的实现类是DistributedFileSystem
  *****************************************************************/
 @InterfaceAudience.Public
 @InterfaceStability.Stable
@@ -2594,6 +2600,7 @@ public abstract class FileSystem extends Configured implements Closeable {
     if (clazz == null) {
       throw new IOException("No FileSystem for scheme: " + uri.getScheme());
     }
+    // 默认的实现类是DistributedFileSystem
     FileSystem fs = (FileSystem)ReflectionUtils.newInstance(clazz, conf);
     fs.initialize(uri, conf);
     return fs;

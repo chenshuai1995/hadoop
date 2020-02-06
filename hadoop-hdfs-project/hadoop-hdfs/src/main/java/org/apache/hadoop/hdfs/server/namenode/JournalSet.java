@@ -53,6 +53,11 @@ import com.google.common.collect.Sets;
  * Manages a collection of Journals. None of the methods are synchronized, it is
  * assumed that FSEditLog methods, that use this class, use proper
  * synchronization.
+ *
+ * 管理一些journal日志的。没有一个方法是同步方法， 假定这些方法都是FSEditLog的方法，使用这个类时，
+ * 要使用正确的同步方法
+ *
+ * JournalSet，集成本地磁盘和JournalNode集群上EditLog的相关操作
  */
 public class JournalSet implements JournalManager {
 
@@ -222,6 +227,7 @@ public class JournalSet implements JournalManager {
         jas.startLogSegment(txId, layoutVersion);
       }
     }, "starting log segment " + txId);
+    // JournalSetOutputStream就是封装了底层多个流的一个聚合流
     return new JournalSetOutputStream();
   }
   
@@ -388,6 +394,7 @@ public class JournalSet implements JournalManager {
       JournalClosure closure, String status) throws IOException{
 
     List<JournalAndStream> badJAS = Lists.newLinkedList();
+    // 遍历自己JournalSet自己内部的多个流，都在journals里面
     for (JournalAndStream jas : journals) {
       try {
         closure.apply(jas);
@@ -435,6 +442,12 @@ public class JournalSet implements JournalManager {
   /**
    * An implementation of EditLogOutputStream that applies a requested method on
    * all the journals that are currently active.
+   *
+   * 执行聚合操作的流，有：
+   * EditLogFileOutputStream(写入本地文件的流)
+   * QuorumOutputStream(写入JournalNodes的流)
+   * BookKeeperEditLogOutputStream(写入BookKeeper的流)
+   * EditLogBackupOutputStream(写入Backup的流)
    */
   private class JournalSetOutputStream extends EditLogOutputStream {
 
@@ -445,10 +458,13 @@ public class JournalSet implements JournalManager {
     @Override
     public void write(final FSEditLogOp op)
         throws IOException {
-      mapJournalsAndReportErrors(new JournalClosure() {
+      mapJournalsAndReportErrors(new JournalClosure() { // 闭包，可以理解成事件回调函数，但不是一回事
         @Override
         public void apply(JournalAndStream jas) throws IOException {
           if (jas.isActive()) {
+            // 调用流的.write
+            // 比如说，有一个JournalAndStream底层封装的是FileJournalManager
+            // 此时getCurrentStream()就会返回FileJournalManager，然后根据这个流的write()把edit log写入到磁盘上去
             jas.getCurrentStream().write(op);
           }
         }
@@ -588,6 +604,10 @@ public class JournalSet implements JournalManager {
   }
   
   void add(JournalManager j, boolean required, boolean shared) {
+    // 会往JournalSet里面放入多个JournalManager
+    // 可能是FileJournalManager，或者是QuorumJournalManager
+    // 每次给JournalSet添加一个JournalManager的时候，就会创建一个JournalAndStream流
+    // JournalAndStream底层封装了JournalManager
     JournalAndStream jas = new JournalAndStream(j, required, shared);
     journals.add(jas);
   }

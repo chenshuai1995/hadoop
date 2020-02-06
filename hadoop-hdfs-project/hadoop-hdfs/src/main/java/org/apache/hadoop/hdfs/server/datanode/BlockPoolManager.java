@@ -124,10 +124,12 @@ class BlockPoolManager {
   
   synchronized void startAll() throws IOException {
     try {
+      // DataNode想NameNode注册的逻辑，就隐藏在这里
       UserGroupInformation.getLoginUser().doAs(
           new PrivilegedExceptionAction<Object>() {
             @Override
             public Object run() throws Exception {
+              // 这里实际上，就是启动BPOfferService线程
               for (BPOfferService bpos : offerServices) {
                 bpos.start();
               }
@@ -196,15 +198,19 @@ class BlockPoolManager {
       if (!toAdd.isEmpty()) {
         LOG.info("Starting BPOfferServices for nameservices: " +
             Joiner.on(",").useForNull("<default>").join(toAdd));
-      
+
+        // nameservice对应一组NameNode（active NameNode和standby NameNode）
+        // 会根据一个nameservice，创建一个BPOfferService
         for (String nsToAdd : toAdd) {
           ArrayList<InetSocketAddress> addrs =
             Lists.newArrayList(addrMap.get(nsToAdd).values());
+          // 创建一个BPOfferService
           BPOfferService bpos = createBPOS(addrs);
           bpByNameserviceId.put(nsToAdd, bpos);
           offerServices.add(bpos);
         }
       }
+      // 启动BPServiceActor对应的那些线程
       startAll();
     }
 

@@ -66,6 +66,10 @@ import com.google.common.annotations.VisibleForTesting;
  * may copies it to another site. If a throttler is provided,
  * streaming throttling is also supported.
  **/
+// 这个组件，负责通过socket输入流，从上游节点读取block数据，一个一个的packet数据包
+// 每次接收到一个packet数据包，都会写入自己本地磁盘文件中
+// 同时也会将这个packet复制一份，发送到pipeline里面的下游datanode去
+// 还支持一些限流
 class BlockReceiver implements Closeable {
   public static final Log LOG = DataNode.LOG;
   static final Log ClientTraceLog = DataNode.ClientTraceLog;
@@ -134,6 +138,9 @@ class BlockReceiver implements Closeable {
   private long lastSentTime;
   private long maxSendIdleTime;
 
+  // 一个block就对应了一个BlockReceiver
+  // 所以对一个block最大的初始化的一个操作，其实是为这个block初始化一个BlockReceiver组件
+  // 这个BlockReceiver组件专门负责接收这个block的packet数据包
   BlockReceiver(final ExtendedBlock block, final StorageType storageType,
       final DataInputStream in,
       final String inAddr, final String myAddr,
@@ -189,7 +196,10 @@ class BlockReceiver implements Closeable {
         replicaInfo = datanode.data.createTemporary(storageType, block);
       } else {
         switch (stage) {
+        // 刚开始的一个阶段，应该是PIPELINE_SETUP_CREATE
+        // 数据管道初始化的一个阶段
         case PIPELINE_SETUP_CREATE:
+          // FsDataset专门负责管理datnode本地磁盘文件
           replicaInfo = datanode.data.createRbw(storageType, block, allowLazyPersist);
           datanode.notifyNamenodeReceivingBlock(
               block, replicaInfo.getStorageUuid());
@@ -1364,6 +1374,7 @@ class BlockReceiver implements Closeable {
 
           if (lastPacketInBlock) {
             // Finalize the block and close the block file
+            // 如果收到的是一个空packet，就认为是block中的最后一个packet
             finalizeBlock(startTime);
           }
 

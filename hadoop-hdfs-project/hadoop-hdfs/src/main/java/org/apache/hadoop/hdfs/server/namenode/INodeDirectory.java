@@ -47,6 +47,7 @@ import com.google.common.collect.ImmutableList;
 
 /**
  * Directory INode class.
+ * 代表一个目录
  */
 public class INodeDirectory extends INodeWithAdditionalFields
     implements INodeDirectoryAttributes {
@@ -67,6 +68,11 @@ public class INodeDirectory extends INodeWithAdditionalFields
   protected static final int DEFAULT_FILES_PER_DIRECTORY = 5;
   final static byte[] ROOT_NAME = DFSUtil.string2Bytes("");
 
+  // INode代表一个文件或者目录
+  // INodeDirectory代表一个目录
+  // INodeFile代表一个文件
+
+  // 既可能代表文件，也有可能代表目录
   private List<INode> children = null;
   
   /** constructor */

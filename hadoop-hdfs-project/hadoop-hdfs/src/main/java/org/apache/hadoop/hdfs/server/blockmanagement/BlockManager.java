@@ -168,6 +168,7 @@ public class BlockManager {
    * Mapping: Block -> { BlockCollection, datanodes, self ref }
    * Updated only in response to client-sent information.
    */
+  // 维护block和其他的映射关系，如DataNode
   final BlocksMap blocksMap;
 
   /** Replication thread. */
@@ -438,8 +439,11 @@ public class BlockManager {
   }
 
   public void activate(Configuration conf) {
+    // PendingReplicationMonitor 后台监控那些进行replication复制block被pending住的操作
     pendingReplications.start();
+    // DecommissionThread 后台监控DataNode退役的线程 + HeartbeatThread 心跳线程
     datanodeManager.activate(conf);
+    // ReplicationMonitor 复制相关的线程
     this.replicationThread.start();
   }
 
@@ -1463,6 +1467,8 @@ public class BlockManager {
           }
 
           // Add block to the to be replicated list
+          // 核心代码：对每个block的复制source datanode，都加入一个复制的目标datanode列表
+          // srcNode，这个datanode，需要复制block，到target指定的目标datanode中去
           rw.srcNode.addBlockToBeReplicated(block, targets);
           scheduledWork++;
           DatanodeStorageInfo.incrementBlocksScheduled(targets);
@@ -1784,6 +1790,10 @@ public class BlockManager {
    * @return true if all known storages of the given DN have finished reporting.
    * @throws IOException
    */
+  // 块汇报
+  // 在DataNode第一次启动是会全量上报
+  // 然后增量上报
+  // 默认是每6小时周期行的全量上报(DataNode的BPServiceActor上报，为了解决增量上报异常)
   public boolean processReport(final DatanodeID nodeID,
       final DatanodeStorage storage,
       final BlockListAsLongs newReport, BlockReportContext context,
@@ -1820,8 +1830,10 @@ public class BlockManager {
       if (storageInfo.getBlockReportCount() == 0) {
         // The first block report can be processed a lot more efficiently than
         // ordinary block reports.  This shortens restart times.
+        // 第一次汇报
         processFirstBlockReport(storageInfo, newReport);
       } else {
+        // 不是第一次汇报
         invalidatedBlocks = processReport(storageInfo, newReport);
       }
       
@@ -3616,6 +3628,7 @@ public class BlockManager {
         try {
           // Process replication work only when active NN is out of safe mode.
           if (namesystem.isPopulatingReplQueues()) {
+            // 核心方法：计算复制任务
             computeDatanodeWork();
             processPendingReplications();
           }

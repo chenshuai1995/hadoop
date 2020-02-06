@@ -39,6 +39,9 @@ import com.google.common.annotations.VisibleForTesting;
  * other DataNodes.  This small server does not use the 
  * Hadoop IPC mechanism.
  */
+// 是一个线程，专门负责接收或者是发送一个数据block
+// 这个东西创建了以后专门用来负责监听从hdfs客户端或者是其他datanode发送过来的请求
+// 这个东西走底层socket网络连接和请求的，不是走hadoop的rpc远程接口调用的机制
 class DataXceiverServer implements Runnable {
   public static final Log LOG = DataNode.LOG;
   
@@ -132,6 +135,7 @@ class DataXceiverServer implements Runnable {
     Peer peer = null;
     while (datanode.shouldRun && !datanode.shutdownForUpgrade) {
       try {
+        // 每次循环到这里，都会阻塞住，PeerServer.accept()方法会等到别人建立socket连接
         peer = peerServer.accept();
 
         // Make sure the xceiver count is not exceeded
@@ -142,6 +146,9 @@ class DataXceiverServer implements Runnable {
               + maxXceiverCount);
         }
 
+        // 只要有人和他建立连接，直接启动一个后台线程，DataXceiver，专门负责处理这个连接所有的请求和响应
+        // 比如说有个hdfs客户端来连接这台datanode
+        // 那么他收到一个连接请求之后，就会创建一个DataXcevier线程来处理和这个hdfs客户端之间的所有请求和响应
         new Daemon(datanode.threadGroup,
             DataXceiver.create(peer, datanode, this))
             .start();

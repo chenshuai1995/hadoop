@@ -198,6 +198,8 @@ public class HealthMonitor {
       HAServiceStatus status = null;
       boolean healthy = false;
       try {
+        // 他有个HAServiceProtocol，里面是rpc协议
+        // 其实说白了，就是调用active namenode的rpc接口
         status = proxy.getServiceStatus();
         proxy.monitorHealth();
         healthy = true;

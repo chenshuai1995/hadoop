@@ -57,6 +57,15 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
  * periodically waking up to take a checkpoint of the namespace.
  * When it takes a checkpoint, it saves it to its local
  * storage and then uploads it to the remote NameNode.
+ *
+ * 这是一个后台线程，在standby namenode里运行的
+ * 周期性的运行对namespace（元数据）的一次checkpoint操作
+ * 当他执行checkpoint操作的时候，他会把自己的namespace（内存里的元数据）写一份到磁盘文件上去，fsimage文件
+ * 然后将这个fsimage文件，上传一份给active namenode
+ *
+ * active namenode就可以时不时的获取到一份最新的fsimage，然后清空之前的一些edit log文件
+ * 这样就可以保证每次namenode启动的时候，其实都是只要将最新的一份fsimag和少量的edit log进行合并即可
+ *
  */
 @InterfaceAudience.Private
 public class StandbyCheckpointer {
@@ -179,6 +188,8 @@ public class StandbyCheckpointer {
       } else {
         imageType = NameNodeFile.IMAGE;
       }
+      // FSImage.saveNamespace()，将内存中的元数据保存到了磁盘文件上去
+      // fsimage_txid，合并了到txid的edit log
       img.saveNamespace(namesystem, imageType, canceler);
       txid = img.getStorage().getMostRecentCheckpointTxId();
       assert txid == thisCheckpointTxId : "expected to save checkpoint at txid=" +
@@ -318,15 +329,21 @@ public class StandbyCheckpointer {
           final long secsSinceLast = (now - lastCheckpointTime) / 1000;
           
           boolean needCheckpoint = needRollbackCheckpoint;
+          // 可以执行checkpoint
           if (needCheckpoint) {
             LOG.info("Triggering a rollback fsimage for rolling upgrade.");
-          } else if (uncheckpointed >= checkpointConf.getTxnCount()) {
+          }
+          // uncheckpointed（还没合并到fsimage的edit log的数量）>= 100万
+          // 也就是说，fsimage文件如果落后于edits log已经100万条数据了，那么执行一次checkpoint操作
+          else if (uncheckpointed >= checkpointConf.getTxnCount()) {
             LOG.info("Triggering checkpoint because there have been " + 
                 uncheckpointed + " txns since the last checkpoint, which " +
                 "exceeds the configured threshold " +
                 checkpointConf.getTxnCount());
             needCheckpoint = true;
-          } else if (secsSinceLast >= checkpointConf.getPeriod()) {
+          }
+          // secsSinceLast（当前时间到上一次checkpoint的间隔）>=1小时
+          else if (secsSinceLast >= checkpointConf.getPeriod()) {
             LOG.info("Triggering checkpoint because it has been " +
                 secsSinceLast + " seconds since the last checkpoint, which " +
                 "exceeds the configured interval " + checkpointConf.getPeriod());
@@ -344,6 +361,7 @@ public class StandbyCheckpointer {
           }
           
           if (needCheckpoint) {
+            // 执行checkpoint
             doCheckpoint();
             // reset needRollbackCheckpoint to false only when we finish a ckpt
             // for rollback image

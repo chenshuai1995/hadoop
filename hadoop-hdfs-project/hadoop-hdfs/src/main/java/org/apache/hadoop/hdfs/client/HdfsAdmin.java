@@ -44,7 +44,10 @@ import org.apache.hadoop.hdfs.tools.DFSAdmin;
  * The public API for performing administrative functions on HDFS. Those writing
  * applications against HDFS should prefer this interface to directly accessing
  * functionality in DistributedFileSystem or DFSClient.
- * 
+ *
+ * 在HDFS上用于执行管理功能的开放API。那些针对HDFS编写的应用程序应该优先使用HdfsAdmin这个接口，
+ * 而不是直接访问DistributedFileSystem或者DFSClient中的功能
+ *
  * Note that this is distinct from the similarly-named {@link DFSAdmin}, which
  * is a class that provides the functionality for the CLI `hdfs dfsadmin ...'
  * commands.

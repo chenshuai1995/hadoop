@@ -35,6 +35,9 @@ import com.google.common.collect.Lists;
  * block, whether it is corrupt, a location is cached in memory,
  * security token, etc).
  */
+// 这个LocatedBlock就代表了一个block，他有多个副本，每个副本放在一个datanode上面
+// 同时也包含了block的其他的元数据
+// （比如说：一个大文件拆成了多个block，这个block是代表了这个大文件的哪一部分的内容，还有，这个block的数据是否破损了）
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
 public class LocatedBlock {

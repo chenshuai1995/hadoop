@@ -110,6 +110,7 @@ public abstract class EditLogOutputStream implements Closeable {
   public void flush(boolean durable) throws IOException {
     numSync++;
     long start = now();
+    // 抽象聚合类在这里往各个地方写入数据,通过这个flushAndSync()
     flushAndSync(durable);
     long end = now();
     totalTimeSync += (end - start);

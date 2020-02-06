@@ -95,15 +95,33 @@ class QuorumOutputStream extends EditLogOutputStream {
       // 2) because the calls to the underlying nodes are asynchronous, we
       //    need a defensive copy to avoid accidentally mutating the buffer
       //    before it is sent.
+
+      //将双缓冲内存中的数据拷贝到一个新的字节数组中去
+      // 1) IPC代码，rpc调用，就是说需要一次性将缓冲区里的数据全部发送到journalnode上去，
+      //   通过rpc接口请求没有办法每次就发送一个大的数组的一部分的
+      // 2) 因为对journalnode的调用时异步的，他需要一个防御型的拷贝，来避免在发送这段数据之前，
+      //   导致这个buffer缓冲被人修改了
+      // 解释一下：需要一次性把所有的buffer里的数据发送到journal node里去
+      // 然后因为他是异步发送的，为了避免在异步发送的时候，还没发送前，buffer的数据被人修改了
+      // 所以在这里会将buffer里的数据先拷贝到一个新的字节数组里去
       DataOutputBuffer bufToSend = new DataOutputBuffer(numReadyBytes);
       buf.flushTo(bufToSend);
+      // 上面两行代码，其实就是将buffer缓冲里的数据，先写入了一个新的DataOutputBuffer里面去
+      // 这里就是将新的DataOutputBuffer里的数据方到了一个byte[] data数组里去
       assert bufToSend.getLength() == numReadyBytes;
       byte[] data = bufToSend.getData();
       assert data.length == bufToSend.getLength();
 
+      // 通过AsyncLoggerSet这个组件，发送edit log到大多数的journalnode上去
+      // 这个过程是异步发送的
+      // 每个AsyncLogger都是基于底层的一个单线程线程池异步发送网络请求的，rpc接口调用
+      // QuorumCall里可以获取到每个AsyncLogger对应的Future
       QuorumCall<AsyncLogger, Void> qcall = loggers.sendEdits(
           segmentTxId, firstTxToFlush,
           numReadyTxns, data);
+      // 在这里必须是等待写edit log到大多数的journal node都成功后，才可以往下运行
+      // 在这里会阻塞等待
+      // 通过这里，观察每个Future结果，来实现Quorum算法
       loggers.waitForWriteQuorum(qcall, writeTimeoutMs, "sendEdits");
       
       // Since we successfully wrote this batch, let the loggers know. Any future

@@ -183,6 +183,7 @@ public class FSEditLogLoader {
         try {
           FSEditLogOp op;
           try {
+            // 核心的读取edit log 逻辑
             op = in.readOp();
             if (op == null) {
               break;

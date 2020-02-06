@@ -94,6 +94,7 @@ import com.google.protobuf.ByteString;
 /**
  * Thread for processing incoming/outgoing data stream.
  */
+// 一个客户端或者一个datanode，建立连接之后，就会由一个DataXcevier线程来处理和他们所有的请求和响应
 class DataXceiver extends Receiver implements Runnable {
   public static final Log LOG = DataNode.LOG;
   static final Log ClientTraceLog = DataNode.ClientTraceLog;
@@ -213,6 +214,7 @@ class DataXceiver extends Receiver implements Runnable {
           } else {
             peer.setReadTimeout(dnConf.socketTimeout);
           }
+          // 在这里读到的就是hdfs客户端发送过来的那个OP操作，WRITE_BLOCK操作
           op = readOp();
         } catch (InterruptedIOException ignored) {
           // Time out while we wait for client rpc
@@ -236,6 +238,7 @@ class DataXceiver extends Receiver implements Runnable {
         }
 
         opStartTime = now();
+        // 处理读、写、复制等请求
         processOp(op);
         ++opsProcessed;
       } while ((peer != null) &&
@@ -477,50 +480,46 @@ class DataXceiver extends Receiver implements Runnable {
     }
   }
 
-  void releaseSocket() {
-    dataXceiverServer.releasePeer(peer);
-    peer = null;
-  }
-
+  // 读数据
   @Override
   public void readBlock(final ExtendedBlock block,
-      final Token<BlockTokenIdentifier> blockToken,
-      final String clientName,
-      final long blockOffset,
-      final long length,
-      final boolean sendChecksum,
-      final CachingStrategy cachingStrategy) throws IOException {
+                        final Token<BlockTokenIdentifier> blockToken,
+                        final String clientName,
+                        final long blockOffset,
+                        final long length,
+                        final boolean sendChecksum,
+                        final CachingStrategy cachingStrategy) throws IOException {
     previousOpClientName = clientName;
     updateCurrentThreadName("Sending block " + block);
     OutputStream baseStream = getOutputStream();
     DataOutputStream out = getBufferedOutputStream();
     checkAccess(out, true, block, blockToken,
-        Op.READ_BLOCK, BlockTokenSecretManager.AccessMode.READ);
-  
+            Op.READ_BLOCK, BlockTokenSecretManager.AccessMode.READ);
+
     // send the block
     BlockSender blockSender = null;
-    DatanodeRegistration dnR = 
-      datanode.getDNRegistrationForBP(block.getBlockPoolId());
+    DatanodeRegistration dnR =
+            datanode.getDNRegistrationForBP(block.getBlockPoolId());
     final String clientTraceFmt =
-      clientName.length() > 0 && ClientTraceLog.isInfoEnabled()
-        ? String.format(DN_CLIENTTRACE_FORMAT, localAddress, remoteAddress,
-            "%d", "HDFS_READ", clientName, "%d",
-            dnR.getDatanodeUuid(), block, "%d")
-        : dnR + " Served block " + block + " to " +
-            remoteAddress;
+            clientName.length() > 0 && ClientTraceLog.isInfoEnabled()
+                    ? String.format(DN_CLIENTTRACE_FORMAT, localAddress, remoteAddress,
+                    "%d", "HDFS_READ", clientName, "%d",
+                    dnR.getDatanodeUuid(), block, "%d")
+                    : dnR + " Served block " + block + " to " +
+                    remoteAddress;
 
     try {
       try {
         blockSender = new BlockSender(block, blockOffset, length,
-            true, false, sendChecksum, datanode, clientTraceFmt,
-            cachingStrategy);
+                true, false, sendChecksum, datanode, clientTraceFmt,
+                cachingStrategy);
       } catch(IOException e) {
-        String msg = "opReadBlock " + block + " received exception " + e; 
+        String msg = "opReadBlock " + block + " received exception " + e;
         LOG.info(msg);
         sendResponse(ERROR, msg);
         throw e;
       }
-      
+
       // send op status
       writeSuccessWithChecksumInfo(blockSender, new DataOutputStream(getOutputStream()));
 
@@ -531,11 +530,11 @@ class DataXceiver extends Receiver implements Runnable {
         // to respond with a Status enum.
         try {
           ClientReadStatusProto stat = ClientReadStatusProto.parseFrom(
-              PBHelper.vintPrefixed(in));
+                  PBHelper.vintPrefixed(in));
           if (!stat.hasStatus()) {
             LOG.warn("Client " + peer.getRemoteAddressString() +
-                " did not send a valid status code after reading. " +
-                "Will close connection.");
+                    " did not send a valid status code after reading. " +
+                    "Will close connection.");
             IOUtils.closeStream(out);
           }
         } catch (IOException ioe) {
@@ -550,7 +549,7 @@ class DataXceiver extends Receiver implements Runnable {
     } catch ( SocketException ignored ) {
       if (LOG.isTraceEnabled()) {
         LOG.trace(dnR + ":Ignoring exception while serving " + block + " to " +
-            remoteAddress, ignored);
+                remoteAddress, ignored);
       }
       // Its ok for remote side to close the connection anytime.
       datanode.metrics.incrBlocksRead();
@@ -560,7 +559,7 @@ class DataXceiver extends Receiver implements Runnable {
        * Earlier version shutdown() datanode if there is disk error.
        */
       LOG.warn(dnR + ":Got exception while serving " + block + " to "
-          + remoteAddress, ioe);
+              + remoteAddress, ioe);
       throw ioe;
     } finally {
       IOUtils.closeStream(blockSender);
@@ -571,6 +570,12 @@ class DataXceiver extends Receiver implements Runnable {
     datanode.metrics.incrReadsFromClient(peer.isLocal());
   }
 
+  void releaseSocket() {
+    dataXceiverServer.releasePeer(peer);
+    peer = null;
+  }
+
+  // 写数据
   @Override
   public void writeBlock(final ExtendedBlock block,
       final StorageType storageType, 
@@ -639,6 +644,10 @@ class DataXceiver extends Receiver implements Runnable {
       if (isDatanode || 
           stage != BlockConstructionStage.PIPELINE_CLOSE_RECOVERY) {
         // open a block receiver
+        // 初始化一个关键性的组件，BlockReceiver
+        // 这个组件后面会负责接收上游传递过来的packet数据包
+        // 将这些packet数据包存储在自己的本地磁盘文件里
+        // 同时还会将这些packet数据包发送到下游的datanode里去
         blockReceiver = new BlockReceiver(block, storageType, in,
             peer.getRemoteAddressString(),
             peer.getLocalAddressString(),
